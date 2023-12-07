@@ -108,8 +108,7 @@ for (let i = 0; i < numberOfSliders; i++) {
       </TextContainer>
     </div>
 
-    <!-- <TextContainer v-if="debate.curPhase === 'Review'"> -->
-    <TextContainer>
+    <TextContainer v-if="debate.curPhase === 'Review'">
       <b class="text-base">Your review</b>
       <p class="pb-2">How interesting is each opinion?</p>
       <div class="space-y-2">
@@ -119,8 +118,7 @@ for (let i = 0; i < numberOfSliders; i++) {
         </div>
       </div>
     </TextContainer>
-
-    <div class="px-3">
+    <div class="px-3" v-if="debate.curPhase === 'Review'">
       <p class="font-bold py-3 text-base">Revise your opinion</p>
       <OpinionSlider v-model="revisedOpinionSliderValue" />
 
@@ -142,17 +140,15 @@ for (let i = 0; i < numberOfSliders; i++) {
         </label>
       </div>
     </div>
-
-    <!-- TODO: temporarily comment this out for testing -->
-    <!-- <TextContainer v-else-if="debate.curPhase === 'Recently Completed' || debate.curPhase === 'Archived'">
+    <TextContainer v-else-if="debate.curPhase === 'Recently Completed' || debate.curPhase === 'Archived'">
       Debate is past Review phase where users review other users' different opinions. Please view debate <a style="color: blue" href="./opinions">here</a>
     </TextContainer>
     <TextContainer v-else-if="debate.curPhase === 'Start'">
       Unavailable because debate is in Start phase where users submit opinions. Please view debate <a style="color: blue" href=".">here</a>
     </TextContainer>
-    <TextContainer v-else> Review Opinions page will be unlocked when a debate is initialized with this prompt. </TextContainer> -->
+    <TextContainer v-else> Review Opinions page will be unlocked when a debate is initialized with this prompt. </TextContainer>
 
-    <div class="flex justify-center space-x-2 pt-3">
+    <div class="flex justify-center space-x-2 pt-3" v-if="debate.curPhase === 'Review'">
       <button @click="submitOpinion" class="btn">Submit</button>
     </div>
   </div>

@@ -28,10 +28,7 @@ function getRouteName() {
 
 <template>
   <!-- TODO: can't specify max width in the div instead of each child? -->
-  <div class="">
-    <RouterView class="max-w-sm mx-auto pb-20" />
-    <NavBottomBar v-if="getRouteName()" :activeIcon="currentRouteName" class="max-w-sm mx-auto" />
-  </div>
+  <div>Test</div>
 </template>
 
 <style scoped>
