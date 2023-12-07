@@ -73,6 +73,5 @@ onBeforeMount(async () => {
         <DebatePrompt :debate="debate" :timeLeft="timeLeft(debate.deadline)" />
       </TextContainer>
     </div>
-
   </div>
 </template>
