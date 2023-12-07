@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useUserStore } from "@/stores/user";
 import { onBeforeMount, ref } from "vue";
-import { useRoute } from "vue-router";
+import { RouterView, useRoute } from "vue-router";
 import NavBottomBar from "./components/Nav/NavBottomBar.vue";
 
 const userStore = useUserStore();
