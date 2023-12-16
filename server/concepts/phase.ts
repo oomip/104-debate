@@ -17,8 +17,8 @@ export default class PhaseConcept {
   public readonly active = new DocCollection<ActivePhaseDoc>("active phases");
   public readonly expired = new DocCollection<BasePhaseDoc>("expired phases");
   private maxPhase = 4;
-  // set debate duration to 15 min for testing purposes
-  private deadlineExtension = 0.25;
+  // set debate duration to 15 min for testing purposes (0.25)
+  private deadlineExtension = 24;
   public numPromptsPerDay = 2;
 
   /**
@@ -59,7 +59,12 @@ export default class PhaseConcept {
    */
   async getHistory() {
     await this.expireOld();
-    return await this.expired.readMany({});
+    return await this.expired.readMany(
+      {},
+      {
+        sort: { dateUpdated: -1 },
+      },
+    );
   }
 
   /**
@@ -225,7 +230,7 @@ export default class PhaseConcept {
     if (!phase) {
       const expiredPhase = await this.expired.readOne({ key });
       if (!expiredPhase) {
-        throw new NoPhaseError(key);
+        return null;
       } else {
         return expiredPhase;
       }

@@ -1,12 +1,11 @@
 import { ObjectId } from "mongodb";
-
 import { Router, getExpressRouter } from "./framework/router";
-
-import { Debate, Phase, Post, User, WebSession } from "./app";
-import { PostDoc, PostOptions } from "./concepts/post";
+import { Debate, Phase, Review, User, WebSession } from "./app";
+import { ReviewDoc } from "./concepts/review";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
 import Responses from "./responses";
+import { NotAllowedError } from "./concepts/errors";
 
 class Routes {
   ////////////////////////// SESSION //////////////////////////
@@ -61,41 +60,12 @@ class Routes {
     return await User.delete(user);
   }
 
-  ////////////////////////// DEBATE //////////////////////////
-
-  @Router.get("/posts")
-  async getPosts(author?: string) {
-    let posts;
-    if (author) {
-      const id = (await User.getUserByUsername(author))._id;
-      posts = await Post.getByAuthor(id);
-    } else {
-      posts = await Post.getPosts({});
-    }
-    return Responses.posts(posts);
-  }
-
-  @Router.post("/posts")
-  async createPost(session: WebSessionDoc, content: string, options?: PostOptions) {
+  @Router.get("/userDeltas")
+  async getUserDelta(session: WebSessionDoc) {
     const user = WebSession.getUser(session);
-    const created = await Post.create(user, content, options);
-    return { msg: created.msg, post: await Responses.post(created.post) };
+    const opinions = await Debate.getUserOpinons(user.toString());
+    return await Review.getUserDelta(opinions);
   }
-
-  @Router.patch("/posts/:_id")
-  async updatePost(session: WebSessionDoc, _id: ObjectId, update: Partial<PostDoc>) {
-    const user = WebSession.getUser(session);
-    await Post.isAuthor(user, _id);
-    return await Post.update(_id, update);
-  }
-
-  @Router.delete("/posts/:_id")
-  async deletePost(session: WebSessionDoc, _id: ObjectId) {
-    const user = WebSession.getUser(session);
-    await Post.isAuthor(user, _id);
-    return Post.delete(_id);
-  }
-
   ////////////////////////// PHASES //////////////////////////
 
   @Router.get("/activeDebates")
@@ -123,7 +93,6 @@ class Routes {
   async getExpiredDebateById(debateID: ObjectId) {
     const completed = await Phase.expireOld();
     await Debate.deleteMatchesForDebate(completed);
-    console.log(await Responses.opinions(await Phase.getExpiredByKey(new ObjectId(debateID))));
     return await Responses.opinions(await Phase.getExpiredByKey(new ObjectId(debateID)));
   }
 
@@ -149,7 +118,54 @@ class Routes {
     return Phase.changeMaxPhase(newMax);
   }
 
-  ////////////////////////// DEBATE //////////////////////////
+  ////////////////////////// REVIEW + OPINION SYNCS //////////////////////////
+
+  @Router.get("/reviews/deltas/:debateID")
+  async getDeltasForDebate(debateID: ObjectId) {
+    const opIDs = await Debate.getOriginalOpinionsByDebate(new ObjectId(debateID));
+    const [_ids, scores] = await Review.getInfoByIds(opIDs);
+    return await Debate.getScoreForOpinions(_ids as string[], scores as number[]);
+  }
+
+  @Router.get("/reviews/delta")
+  async getComputedScore(debateID: string, opinion: string) {
+    return await Review.getDeltaForOpinion(debateID, opinion);
+  }
+
+  @Router.post("/opinion/submitReview")
+  async submitReview(session: WebSessionDoc, debateId: string, opinion: ObjectId, score: number) {
+    const user = WebSession.getUser(session);
+    return await Review.create(user.toString(), debateId, opinion.toString(), score);
+  }
+
+  @Router.patch("/reviews/:_id")
+  async updateReview(session: WebSessionDoc, _id: ObjectId, update: Partial<ReviewDoc>, debateId: string) {
+    const user = WebSession.getUser(session);
+    try {
+      const inReviewPhase = (await Phase.getPhaseByKey(new ObjectId(debateId)))?.curPhase === 1;
+      if (inReviewPhase) {
+        await Review.isReviewer(_id, user.toString());
+        return await Review.update(_id, update);
+      } else {
+        return { msg: "This review's debate is not in the Review phase." };
+      }
+    } catch (e) {
+      return e;
+    }
+  }
+
+  @Router.delete("/reviews/:debateID")
+  async deleteReviews(session: WebSessionDoc, debateID: string) {
+    const user = WebSession.getUser(session);
+    return await Review.deleteByReviewer(user.toString(), debateID);
+  }
+
+  @Router.get("/review/score/")
+  async getScoreForReview(session: WebSessionDoc, debateID: string, opinion: string) {
+    const user = WebSession.getUser(session);
+    return await Review.getScoreByReviewer(user.toString(), debateID, opinion);
+  }
+  ////////////////////////// DEBATE + SYNCS //////////////////////////
 
   @Router.post("/debate/newPrompt")
   async suggestPrompt(prompt: string, category: string) {
@@ -163,20 +179,36 @@ class Routes {
   }
 
   @Router.post("/debate/submitOpinion")
-  async submitOpinion(session: WebSessionDoc, debate: ObjectId, content: string, likertScale: string) {
+  async submitOpinion(session: WebSessionDoc, debate: ObjectId, content: string, likertScale: number) {
     const user = WebSession.getUser(session);
     const completed = await Phase.expireOld();
     await Debate.deleteMatchesForDebate(completed);
     await Phase.getPhaseByKey(new ObjectId(debate)); // checks if debate is active
-    return await Debate.addOpinion(debate, user.toString(), content, likertScale);
+    const resp = await Debate.addOpinion(debate, user.toString(), content, likertScale);
+    return resp;
   }
 
-  @Router.get("/debate/matchOpinions")
-  async matchParticipantToDifferentOpinions(debate: ObjectId) {
+  @Router.post("/debate/submitRevisedOpinion")
+  async submitRevisedOpinion(session: WebSessionDoc, debate: ObjectId, content: string, likertScale: number) {
+    const user = WebSession.getUser(session);
     const completed = await Phase.expireOld();
     await Debate.deleteMatchesForDebate(completed);
-    await Phase.getPhaseByKey(debate); // checks if debate is active
-    return await Debate.matchParticipantToDifferentOpinions(debate);
+    await Phase.getPhaseByKey(new ObjectId(debate)); // checks if debate is active
+    return await Debate.addRevisedOpinion(debate, user.toString(), content, likertScale);
+  }
+
+  @Router.post("/debate/matchOpinions")
+  async matchParticipantToDifferentOpinions(session: WebSessionDoc, debate: string) {
+    const user = WebSession.getUser(session);
+    const completed = await Phase.expireOld();
+    await Debate.deleteMatchesForDebate(completed);
+    await Phase.getPhaseByKey(new ObjectId(debate)); // checks if debate is active
+    try {
+      const opinnionMatches = await Debate.matchParticipantToDifferentOpinions(debate, user.toString());
+      return await Responses.opinionContents(opinnionMatches);
+    } catch {
+      throw new NotAllowedError("You can't review opinions of this debate because you didn't submit an opinion responding to this debate's prompt in Phase I (Opinions)");
+    }
   }
 
   @Router.post("/debate/removeMatchedOpinion")
@@ -191,6 +223,12 @@ class Routes {
   async getMyOpinionForDebate(session: WebSessionDoc, debateID: string) {
     const user = WebSession.getUser(session);
     return await Debate.getOpinionForDebateByAuthor(debateID, user.toString());
+  }
+
+  @Router.get("/debate/getMyRevisedOpinion/:debateID")
+  async getMyRevisedOpinionForDebate(session: WebSessionDoc, debateID: string) {
+    const user = WebSession.getUser(session);
+    return await Debate.getRevisedOpinionForDebateByAuthor(debateID, user.toString());
   }
 
   @Router.delete("/debate/deleteMyOpinion/:debateID")

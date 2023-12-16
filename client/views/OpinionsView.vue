@@ -1,20 +1,21 @@
 <script setup lang="ts">
 import BackArrowHeader from "@/components/Nav/BackArrowHeader.vue";
 import TextContainer from "@/components/TextContainer.vue";
-import { useRoute } from "vue-router";
-import { fetchy } from "@/utils/fetchy";
-import { onBeforeMount, ref } from "vue";
 import { useUserStore } from "@/stores/user";
+import { fetchy } from "@/utils/fetchy";
 import { storeToRefs } from "pinia";
+import { onBeforeMount, ref } from "vue";
+import { useRoute } from "vue-router";
 import router from "../router";
 
 const route = useRoute();
-const debateId = route.params.id;
+const debateId = typeof route.params.id === "string" ? route.params.id : "";
 const opinions = ref<Array<Record<string, string>>>([]);
 const loaded = ref(false);
 const debatePhase = ref("");
 const prompt = ref("");
 const category = ref("");
+const routePath = route.path.slice(-1) === "/" ? route.path.substring(0, route.path.length - 1) : route.path;
 
 const { isLoggedIn } = storeToRefs(useUserStore());
 
@@ -23,14 +24,13 @@ async function getOpinions() {
   try {
     res = await fetchy(`/api/historyDebates/${debateId}`, "GET", {});
   } catch (_) {
-    console.log("error");
     return;
   }
-
   opinions.value = res.opinions;
   debatePhase.value = res.curPhase;
   category.value = res.category;
   prompt.value = res.prompt;
+  return;
 }
 
 onBeforeMount(async () => {
@@ -51,7 +51,7 @@ onBeforeMount(async () => {
       <BackArrowHeader text="Debate" />
     </TextContainer>
 
-    <TextContainer>
+    <TextContainer v-if="debatePhase">
       <div class="border-l-0 border-neutral-300 space-y-1">
         <div class="flex justify-between items-center">
           <b class="text-sm">{{ category }}</b>
@@ -65,18 +65,28 @@ onBeforeMount(async () => {
       <section v-if="opinions.length > 0">
         <div v-for="opinion in opinions" :key="opinion._id" class="flex flex-col">
           <TextContainer>
-            <b class="text-sm">Opinion </b>
-            <p>{{ opinion.content }}</p>
+            <b class="text-sm">User Opinion: </b>
+            {{ opinion.content }}
+            <p class="text-right">{{ opinion.score || 0 }} Deltas</p>
           </TextContainer>
         </div>
       </section>
       <TextContainer v-else> No opinions were submitted for this prompt </TextContainer>
     </div>
+    <div v-else-if="debatePhase === 'Review'">
+      <TextContainer> Unavailable because this debate is in Phase II (Reviews) where users review opinions. Please view this debate <a style="color: blue" href="./reviews">here</a> </TextContainer>
+    </div>
     <div v-else-if="debatePhase === 'Start'">
-      <TextContainer> Unavailable because debate is in Start phase where users submit opinions. Please view debate <a style="color: blue" href=".">here</a> </TextContainer>
+      <TextContainer>
+        Unavailable because this debate is in Phase I (Opinions) where users submit opinions. Please view this debate
+        <a style="color: blue" :href="'/' + routePath.substring(1, routePath.lastIndexOf('/'))">here</a>
+      </TextContainer>
+    </div>
+    <div v-else-if="debatePhase === 'Proposed'">
+      <TextContainer> Opinion Submission page will be unlocked when a debate is initialized with this prompt. </TextContainer>
     </div>
     <div v-else>
-      <TextContainer> Opinion Submission page will be unlocked when a debate is initialized with this prompt. </TextContainer>
+      <TextContainer> No debate with ID {{ debateId }} found. </TextContainer>
     </div>
   </div>
 </template>

@@ -15,38 +15,74 @@ const debate = ref<Record<string, string>>({});
 const loaded = ref(false);
 const timeLeft = ref();
 const timeUnit = ref("hr");
+const timeLeftString = ref("");
 const { isLoggedIn } = storeToRefs(useUserStore());
-console.log(route.path.slice(-1) === "/");
-const routePath = (route.path.slice(-1) === "/" ? route.path.substring(0, route.path.length - 1) : route.path) + "/opinions";
+const routePath = route.path.slice(-1) === "/" ? route.path.substring(0, route.path.length - 1) : route.path;
+
+function routeBasedOnPhase(curPhase: string) {
+  if (curPhase == "Start") {
+    void router.push({
+      path: `/debates/${debateId}/reviews`,
+    });
+  } else if (curPhase == "Proposed") {
+    void router.push({
+      path: `/debates/${debateId}`,
+    });
+  } else {
+    void router.push({
+      path: `/debates/${debateId}/opinions`,
+    });
+  }
+}
+
 async function getDebate() {
   let res;
   try {
     res = await fetchy(`/api/activeDebates/${debateId}`, "GET", {});
+    const currentTime = new Date().getTime();
+    const debateDeadline = new Date(res.deadline).getTime();
+    const curPhase = res.curPhase;
+    const numMilliSecLeft = Math.floor(debateDeadline - currentTime);
+    timeLeft.value = Math.floor((debateDeadline - currentTime) / 36e5);
+    setTimeout(() => {
+      routeBasedOnPhase(curPhase);
+    }, numMilliSecLeft);
+    // less than 1 hour left
+    if (timeLeft.value == 0) {
+      timeUnit.value = "min";
+      timeLeft.value = Math.floor((debateDeadline - currentTime) / 6e4);
+      // less than 1 min left
+      if (timeLeft.value == 0) {
+        const numSecLeft = Math.floor((debateDeadline - currentTime) / 1e3);
+        if (numSecLeft > 0) {
+          timeLeftString.value = "<1 min";
+        } else {
+          timeLeftString.value = timeLeft.value + " " + timeUnit.value;
+        }
+      } else {
+        timeLeftString.value = timeLeft.value + " " + timeUnit.value;
+      }
+    } else {
+      timeLeftString.value = timeLeft.value + " " + timeUnit.value;
+    }
   } catch (_) {
-    console.log("error");
     return;
   }
-  const currentTime = new Date().getTime();
-  const debateDeadline = new Date(res.deadline).getTime();
-  timeLeft.value = Math.floor((debateDeadline - currentTime) / 36e5);
-  // less than 1 hour left
-  if (timeLeft.value == 0) {
-    timeUnit.value = "min";
-    timeLeft.value = Math.floor((debateDeadline - currentTime) / 6e4);
-    // no time left
-    if (timeLeft.value <= 0) {
-      if (res.curPhase === "Review") {
-        void router.push({
-          path: `/debates/${debateId}/reviews`,
-        });
-      } else {
-        void router.push({
-          path: `/debates/${debateId}/opinions`,
-        });
-      }
-    }
-  }
   debate.value = res;
+  return;
+}
+
+function formatDate(dateString: string) {
+  const options = {
+    // year: null,
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    // timeZoneName: 'short' // Include this to show timezone information
+  };
+  return new Date(dateString).toLocaleDateString("en-US", options as Intl.DateTimeFormatOptions);
 }
 
 onBeforeMount(async () => {
@@ -67,24 +103,22 @@ onBeforeMount(async () => {
       <BackArrowHeader text="Debate" />
     </TextContainer>
 
-    <section v-if="debate.curPhase === 'Start'">
-      <TextContainer>
-        <div class="flex justify-center">
-          <div>
-            <p class="text-base">
-              Due at <b>{{ debate.deadline }}</b>
-            </p>
-            <p class="text-sm">{{ timeLeft + " " + timeUnit }} remaining</p>
-          </div>
+    <TextContainer v-if="debate.curPhase === 'Start'">
+      <div class="flex justify-center">
+        <div>
+          <p class="text-base">
+            <b class="text-lime-400">Opinion</b> due
+            <b>{{ formatDate(debate.deadline) }}</b>
+          </p>
+          <p class="text-sm">{{ timeLeftString }} remaining</p>
         </div>
-      </TextContainer>
-    </section>
+      </div>
+    </TextContainer>
 
-    <TextContainer>
+    <TextContainer v-if="debate.curPhase">
       <div class="border-l-0 border-neutral-300 space-y-1">
         <div class="flex justify-between items-center">
           <b class="text-sm">{{ debate.category }}</b>
-          <!-- <p class="text-sm text-lime-400">Due in 6h</p> -->
         </div>
         <p class="pb-1 text-base">{{ debate.prompt }}</p>
       </div>
@@ -96,8 +130,12 @@ onBeforeMount(async () => {
     <div v-else-if="debate.curPhase === 'Proposed'">
       <TextContainer> Opinion Submission page will be unlocked when a debate is initialized with this prompt. </TextContainer>
     </div>
-    <div v-else>
-      <TextContainer> Debate is past Start phase where users can submit opinions. Please view debate <a style="color: blue" :href="routePath">here</a> </TextContainer>
+    <div v-else-if="debate.curPhase === 'Review'">
+      <TextContainer> Debate is past Phase I (Opinions) where users can submit opinions. Please view this debate <a style="color: blue" :href="routePath + '/reviews'">here</a> </TextContainer>
     </div>
+    <div v-else-if="debate.curPhase">
+      <TextContainer> Debate is past Phase I (Opinions) where users can submit opinions. Please view this debate <a style="color: blue" :href="routePath + '/opinions'">here</a> </TextContainer>
+    </div>
+    <TextContainer v-else> No active debate with ID {{ debateId }} is found.</TextContainer>
   </div>
 </template>

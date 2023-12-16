@@ -1,6 +1,7 @@
-import { Debate, User } from "./app";
-import { ActivePhaseDoc, BasePhaseDoc, KeyExistsError, NoPhaseError } from "./concepts/phase";
-import { PostAuthorNotMatchError, PostDoc } from "./concepts/post";
+import { ObjectId } from "mongodb";
+import { Debate, Review } from "./app";
+import { DifferentOpinionMatchDoc } from "./concepts/debate";
+import { ActivePhaseDoc, BasePhaseDoc, KeyExistsError } from "./concepts/phase";
 import { Router } from "./framework/router";
 
 const PHASES = ["Proposed", "Start", "Review", "Recently Completed", "Archived"];
@@ -9,26 +10,6 @@ const PHASES = ["Proposed", "Start", "Review", "Recently Completed", "Archived"]
  * This class does useful conversions for the frontend.
  */
 export default class Responses {
-  /**
-   * Convert PostDoc into more readable format for the frontend by
-   * converting the author id into a username.
-   */
-  static async post(post: PostDoc | null) {
-    if (!post) {
-      return post;
-    }
-    const author = await User.getUserById(post.author);
-    return { ...post, author: author.username };
-  }
-
-  /**
-   * Same as {@link post} but for an array of PostDoc for improved performance.
-   */
-  static async posts(posts: PostDoc[]) {
-    const authors = await User.idsToUsernames(posts.map((post) => post.author));
-    return posts.map((post, i) => ({ ...post, author: authors[i] }));
-  }
-
   /**
    * Convert PhaseDoc into more readable format for the frontend by
    * converting the key id into a debate prompt and the curPhase into
@@ -55,25 +36,45 @@ export default class Responses {
     if (!phase) {
       return phase;
     }
+    let opinionsWithScore = [];
     const opinions = await Debate.getAllOpinionsForDebate(phase.key.toString());
     const debate = await Debate.getDebateById(phase.key);
-    return { opinions, prompt: debate.prompt, category: debate.category, curPhase: PHASES[phase.curPhase] };
+    const debateID = debate._id.toString();
+    for (let i = 0; i < opinions.length; i++) {
+      let score = 0;
+      const opinion = { ...opinions[i], score: 0 };
+      const opinionID = opinions[i]._id.toString();
+      const reviews = await Review.getReviewsByOpinion(debateID, opinionID);
+      for (const review of reviews) {
+        const likertDiff = await Debate.getLikertDiffByUser(debateID, review.reviewer.toString());
+        const weight = review.score / 150;
+        score += likertDiff * weight;
+      }
+      opinion.score = (await Review.uploadTotalScore(debate._id.toString(), opinions[i]._id.toString(), Math.round(score))).score;
+      opinionsWithScore.push(opinion);
+    }
+    opinionsWithScore = opinionsWithScore
+      .sort(
+        (
+          prev: { score: number; content: string; author: string; likertScale: number; debate: string; _id: ObjectId; dateCreated: Date; dateUpdated: Date },
+          curr: { score: number; content: string; author: string; likertScale: number; debate: string; _id: ObjectId; dateCreated: Date; dateUpdated: Date },
+        ) => Number(prev.score) - Number(curr.score),
+      )
+      .reverse();
+    return { opinions: opinionsWithScore, prompt: debate.prompt, category: debate.category, curPhase: PHASES[phase.curPhase] };
+  }
+
+  static async opinionContents(matchedOpinions: DifferentOpinionMatchDoc | null) {
+    if (!matchedOpinions) {
+      return matchedOpinions;
+    }
+    const opinions = matchedOpinions.matchedDifferentOpinions;
+    const opinionContents = await Promise.all(opinions.map(async (opinion) => await Debate.getOpinionContentById(new ObjectId(opinion))));
+    return opinionContents;
   }
 }
 
-Router.registerError(PostAuthorNotMatchError, async (e) => {
-  const username = (await User.getUserById(e.author)).username;
-  return e.formatWith(username, e._id);
-});
-
 Router.registerError(KeyExistsError, async (e) => {
-  // const debateObj = await Debate.getDebateById(e.key);
-  // const promptFormatted = '\"' + debate.prompt + '\"';
-  // return e.formatWith(promptFormatted);
-  return e; // DELETE ME
-});
-
-Router.registerError(NoPhaseError, async (e) => {
   // const debateObj = await Debate.getDebateById(e.key);
   // const promptFormatted = '\"' + debate.prompt + '\"';
   // return e.formatWith(promptFormatted);
